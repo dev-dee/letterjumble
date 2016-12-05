@@ -1,0 +1,36 @@
+{
+  "name": "letterjumble",
+  "version": "1.0.0",
+  "description": "Alexa skill for a jumbled letter game.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dev-dee/alexa-letterjumble.git"
+  },
+  "keywords": [
+    "alexa",
+    "wordsapi"
+  ],
+  "author": "Kirit Tanna",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/dev-dee/alexa-letterjumble/issues"
+  },
+  "homepage": "https://github.com/dev-dee/alexa-letterjumble#readme",
+  "alexa": {
+    "applicationId": "amzn1.echo-sdk-ams.app.999999-d0ed-9999-ad00-999999d00ebe"
+  },
+  "dependencies": {
+    "alexa-app": "^2.3.4",
+    "chai": "^3.5.0",
+    "chai-as-promised": "^6.0.0",
+    "lodash": "^4.17.2",
+    "mocha": "^3.1.2",
+    "request-promise": "^4.1.1",
+    "ssml-builder": "^0.1.0",
+    "swagger-client": "^2.1.23"
+  }
+}
