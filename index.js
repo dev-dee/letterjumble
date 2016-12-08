@@ -3,12 +3,11 @@
 var _ = require('lodash');
 var Alexa = require('alexa-app');
 var Speech = require('ssml-builder');
-
 module.change_code = 1;
-
+_.templateSettings.interpolate = /{{([\s\S]+?)}}/g;
 var Sentences = {
 	PRE_LETTER_ANNOUNCE_REPEAT: 'The letters are',
-	PRE_LETTER_ANNOUNCE: 'The letters of the { count } are',
+	PRE_LETTER_ANNOUNCE: 'The letters of the {{count}} word are',
 	TRY_NEW: 'Do you want to try a new word?',
 	INVALID_NUMBER: 'Sorry, I didn\'t hear a valid number.',
 	GAME_OBJECTIVE: 'Rearrange the letters to find the hidden word.',
@@ -23,7 +22,7 @@ var Sentences = {
 
 var APP_NAME = 'letterjumble'
 var WORDNET_API_KEY = '3276577be2ae91290e0020d0368094825231c2b7a4fcf6ebb';
-
+var DEFAULT_LEVEL = 5;
 var app = new Alexa.app(APP_NAME);
 app.persistentSession = true;
 app.messages.NO_INTENT_FOUND = Sentences.NO_INTENT_FOUND;
@@ -43,49 +42,25 @@ var swagger = new Swagger({
 });
 
 function announceWord(word, preText) {
+	console.log('announceWord: ' + word + ' / ' + preText);
 	var speech = new Speech();
 	speech.say(preText);
-	var char = 0;
-	while(char < word.length) {
-		speech.pause('1s');
-		speech.say(word.charAt(char));
-		char++;
+	for(var i = 0; i < word.length; i++) {
+		speech.pause('500ms');
+		speech.say(word[i]);
 	}
 	return speech.ssml(true);
 }
 
-function playLevel(level, req, res) {
-	console.log('playLevel: ' + arguments);
-	var wordsAttempted = req.session('words');
-	var wordsFetched = req.session('words_fetched');
-	console.log('Words: ' + wordsAttempted.length + " / " + wordsFetched.length);
-	if(wordsFetched.length <= 1) {
-		return getRandomWords(level).then(function(data) {
-			var newWords = data.obj.map(function(o) {
-				return o.word;
-			});
-			wordsFetched = _.uniq(_.concat(req.session('words_fetched'), newWords));
-			wordsAttempted = setUniqueRandomWord(wordsFetched, wordsAttempted);
-			res.session('words_fetched', wordsFetched);
-			playNext(res, wordsAttempted);
-
-	    }).catch(function(error) {
-			console.log(error);
+function loadWords(level) {
+	return getRandomWords(level).then(function(data) {
+		var newWords = data.obj.map(function(o) {
+			return o.word;
 		});
-	} else {
-		wordsAttempted = setUniqueRandomWord(req.session('words_fetched'), wordsAttempted);
-		return playNext(res, wordsAttempted);
-	}
-}
-
-function playNext(res, wordsAttempted) {
-	var o = _.first(wordsAttempted);
-	var shuffledWord = o.shuffled;
-	console.log(o);
-	var speechOutput = announceWord(shuffledWord, _.template(Sentences.PRE_LETTER_ANNOUNCE)((wordsAttempted.length > 1 ? 'next' : 'first')));
-	res.session('words', _.dropRight(wordsAttempted));
-	res.shouldEndSession(false, speechOutput);
-	return Promise.resolve(res);
+		return _.uniq(newWords);
+    }).catch(function(error) {
+		return Promise.reject(new Error(error));
+	});
 }
 
 function setLevel(res, level) {
@@ -116,20 +91,15 @@ function getRandomWords(length) {
 		maxLength: length,
 		sortBy: 'alpha',
 		sortOrder: 'asc',
-		limit: 10
+		limit: 100
 	}, {
 		responseContentType: 'application/json'
 	});
 }
 
-function setUniqueRandomWord(wordsFetched, wordsAttempted) {
-	console.log('setUniqueRandomWord: ' + wordsFetched.length);
-	var len = wordsFetched.length;
-	var randomIndex = Math.floor(Math.random() * len);
-	var randomWord = wordsFetched[randomIndex];
-	wordsFetched.splice(randomIndex, 1);
-	var shuffledWord = _.shuffle(randomWord.split(''));
-	return _.concat({
+function getNextWord(randomWord) {
+	var shuffledWord = _.shuffle(randomWord.toUpperCase().split(''));
+	return {
 		id: _.uniqueId('word_'),
 		word: randomWord,
 		shuffled: shuffledWord,
@@ -137,7 +107,7 @@ function setUniqueRandomWord(wordsFetched, wordsAttempted) {
 		timestamp: Date.now(),
 		guessTimestamp: 0,
 		guesses: []
-	}, wordsAttempted);
+	};
 }
 
 function getWordDefinition(word) {
@@ -308,11 +278,25 @@ app.sessionEnded(function(request,response) {
 
 app.launch(function(req,res) {
 	console.log('launch');
-	res.session('level', 5);
-	res.session('words', []);
-	res.session('words_fetched', []);
-	var prompt = Sentences.GAME_OBJECTIVE;
-	res.say(prompt).shouldEndSession(false, prompt);;
+	res.session('level', DEFAULT_LEVEL);
+	
+	loadWords(DEFAULT_LEVEL).then(function(words) {
+		var randomWord = words[_.random(0, words.length)];
+		var wordsList = _.without(words, randomWord);
+		console.log('Random Word: ' + randomWord);
+		console.log('Word list: ' + wordsList.length);
+		var o = getNextWord(randomWord);
+		var wordsPlayed = [o];
+		res.session('words_list', wordsList);
+		res.session('words', wordsPlayed);
+		
+		var speechOutput = announceWord(o.shuffled, _.template(Sentences.PRE_LETTER_ANNOUNCE)({ 'count': 'first' }));
+		res.say(speechOutput);
+		res.shouldEndSession(false);
+		res.send();
+	});
+
+	return false;
 });
 
 module.exports = app;
