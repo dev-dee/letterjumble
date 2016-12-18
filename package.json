@@ -27,6 +27,6 @@
     "alexa-app": "^2.3.4",
     "lodash": "^4.17.2",
     "ssml-builder": "^0.1.0",
-    "swagger-client": "^2.1.23"
+    "request-json": "^0.6.1"
   }
 }

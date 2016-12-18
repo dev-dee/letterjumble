@@ -3,7 +3,7 @@
 var _ = require('lodash');
 var Alexa = require('alexa-app');
 var Speech = require('ssml-builder');
-var Swagger = require('swagger-client');
+var request = require('request-json');
 
 module.change_code = 1;
 _.templateSettings.interpolate = /{{([\s\S]+?)}}/g;
@@ -12,52 +12,41 @@ var APP_NAME = 'LetterJumble';
 var INTENT_LEVEL = 'LetterJumbleLevel';
 var INTENT_GUESS = 'LetterJumbleGuess';
 var INTENT_SCORE = 'LetterJumbleScore';
-var WORDNET_API_KEY = '3276577be2ae91290e0020d0368094825231c2b7a4fcf6ebb';
-var DEFAULT_LEVEL = 3;
-var WORD_LIMIT = 50;
+var isLocal = true;
+var levelDifficulty = { EASY:'EASY', MEDIUM: 'MEDIUM', HARD: 'HARD' };
+var DEFAULT_LEVEL = levelDifficulty.EASY;
+
+var COUNTRIES_URL = 'https://restcountries.eu/rest/v1/all';
+var WIKI_API_URL = 'https://en.wikipedia.org/w/api.php?format=json&action=query&prop=extracts&exintro=&explaintext=&titles={{keyword}}';
 
 var Sentences = {
+	WIKI_FACT: 'Fact from Wiki about {{word}}: {{fact}}',
+	HEARD_YOU_SAY: 'You said {{word}}',
 	PRE_LETTER_ANNOUNCE_REPEAT: 'The letters are',
-	PRE_LETTER_ANNOUNCE: 'The letters of the {{count}} {{letter_count}} lettered word are',
+	PRE_LETTER_ANNOUNCE: 'The letters of the {{count}} word are',
 	TRY_NEW: 'Do you want to try a new word?',
-	INVALID_NUMBER: 'Sorry, I didn\'t hear a valid number.',
 	WELCOME: 'Welcome to the Letter Jumble game!',
 	GAME_OBJECTIVE: 'Rearrange the letters to find the hidden word.',
 	ERROR: 'Sorry, something went wrong! Restarting ...',
-	VALID_NUMBER_WARNING: 'You may only pick a number between 3 and 10.',
 	SUCCESS_MESSAGE: '{{exclaim}} You scored {{score}} points.',
-	FAILURE_MESSAGE: 'Sorry, that was incorrect. The word is {{word}}.',
-	WORD_DEFINITION: '{{word}} means {{definition}}.',
-	DIFFICULTY_LEVEL: 'Level set at {{level}}.',
-	SETTIING_GAME_LEVEL: 'Start by setting the level from 3 to 10.',
+	DIFFICULTY_LEVEL: 'Nice, you will be presented {{count}} letter words.',
+	SETTIING_GAME_LEVEL: 'Start by setting the level to ' + levelDifficulty.EASY + ', ' + levelDifficulty.MEDIUM + ' or ' + levelDifficulty.HARD + '.',
 	PLAY_DEFAULT_LEVEL: 'Do you want to start playing, level ' + DEFAULT_LEVEL + '?',
 	NO_INTENT_FOUND: 'Sorry, I didn\'t understand that.',
 	SKIP_TO_NEXT: 'Do you want to skip to the next word?',
 	CONTINUE: 'Do you want to continue playing?',
-	NOT_A_WORD: 'Sorry, your guess is incorrect. The correct word is {{word}}.',
+	NOT_A_WORD: 'Sorry, you said {{guess}}. However, that is incorrect. The word is {{word}}.',
 	TOTAL_SCORE: 'Your score is {{score}}.'
 };
 
-var app = new Alexa.app(APP_NAME, 'arn:aws:lambda:us-east-1:543863165587:function:letterjumble');
-app.exhaustiveUtterances = true;
+var app = new Alexa.app(APP_NAME, !isLocal ? 'arn:aws:lambda:us-east-1:543863165587:function:letterjumble' : 'letterjumble');
+app.exhaustiveUtterances = false;
 app.persistentSession = true;
 app.messages.NO_INTENT_FOUND = Sentences.NO_INTENT_FOUND;
 
-var client = null;
-var swagger = new Swagger({
-	url: 'https://api.apis.guru/v2/specs/wordnik.com/4.0/swagger.json',
-	usePromise: true,
-	authorizations: {
-		api_auth: new Swagger.ApiKeyAuthorization('api_key', WORDNET_API_KEY, 'query')
-	}
-}).then(function(c) {
-	client = c;
-	console.log('connected');
-}).catch(function(error) {
-	console.log('error connecting to api: ' + error);
-});
+var client = request.createClient('');
 
-function startGame(res) {
+function startGame(req, res) {
 	res.session('game_started', false);
 	var speech = new Speech();
 	speech.say(Sentences.GAME_OBJECTIVE);
@@ -85,55 +74,36 @@ function announceWord(word, preText) {
 }
 
 function loadWords(level) {
-	return getRandomWords(level).then(function(data) {
-		if(data.obj.length <= 0) {
-			return loadWords(DEFAULT_LEVEL);
-		}
-
-		var newWords = data.obj.map(function(o) {
-			if(o.word.indexOf(' ') === -1 &&
-			   o.word.indexOf('-') === -1 &&
-			   o.word.indexOf('\'') === -1) {
-				return o.word;
+	return getCountries().then(function(data) {
+		return _.compact(data.map(function(country) {
+			if(country.name.length >= level.min && country.name.length <= level.max) {
+				return country.name;
 			}
-		});
-		return _.uniq(_.compact(newWords));
+		}));
     }).catch(function(error) {
 		return Promise.reject(error);
 	});
 }
 
-function setLevel(level, res) {
+function setLevel(level, req, res) {
 	console.log('setLevel: ' + level);
-	if (level >= 3 && level <= 10) {
-		res.session('level', level);
-		res.session('words_list', []);
-		res.session('game_started', true);
-		return startPlaying(level, res);
-	} else if(level < 3 || level > 10) {
-		res.say(Sentences.VALID_NUMBER_WARNING);
-	} else {
-		res.say(Sentences.INVALID_NUMBER);
-	}
+	res.session('level', level);
+	res.session('words_list', []);
+	res.session('game_started', true);
+	return startPlaying(level, req, res);
 }
 
-function getRandomWords(length) {
-	console.log('getRandomWords: ' + length);
-	return client.words.getRandomWords({
-		hasDictionaryDef: true,
-		includePartOfSpeech: ['adverb', 'adjective', 'imperative', 'noun', 'verb', 'verb-intransitive', 'verb-transitive'].join(','),
-		// excludePartOfSpeech	: ['article', 'abbreviation', 'affix', 'auxiliary-verb', 'conjunction', 'definite-article', 'family-name', 'given-name', 'idiom', 'interjection', 'noun-plural', 'noun-posessive', 'past-participle', 'pronoun', 'phrasal-prefix', 'preposition', 'proper-noun', 'proper-noun-plural', 'proper-noun-posessive', 'suffix'].join(','),
-		minCorpusCount: 0,
-		maxCorpusCount: -1,
-		minDictionaryCount: 1,
-		maxDictionaryCount: -1,
-		minLength: length,
-		maxLength: length,
-		sortBy: 'alpha',
-		sortOrder: 'asc',
-		limit: WORD_LIMIT
-	}, {
-		responseContentType: 'application/json'
+function getCountries() {
+	console.log('getCountries');
+	return new Promise(function(resolve, reject) {
+		client.get(COUNTRIES_URL, {}, function(err, res, body) {
+			var countries = body.map(function(country) {
+				if(country.name.indexOf(' ') === -1) {
+					return _.pick(country, ['name', 'capital', 'population', 'demonym'])
+				}
+			});
+			resolve(_.compact(countries));
+		});
 	});
 }
 
@@ -165,16 +135,20 @@ function calculateBonus(o) {
 }
 
 function getWordDefinition(word) {
-	// console.log('getWordDefinition: ' + word);
-	return client.word.getDefinitions({
-		word: word,
-		limit: 3
-	}, {
-		responseContentType: 'application/json'
+	console.log('getWordDefinition: ' + word);
+	return new Promise(function(resolve, reject) {
+		client.get(_.template(WIKI_API_URL)({
+			'keyword': word
+		}), {}, function(err, res, body) {
+			var key = _.first(_.keys(body.query.pages));
+			var extract = body.query.pages[key.toString()]['extract'];
+			var sentences = extract.split('. ');
+			resolve(sentences[_.random(1, sentences.length)]);
+		});
 	});
 }
 
-function startPlaying(level, res) {
+function startPlaying(level, req, res) {
 	return loadWords(level).then(function(words) {
 		// console.log('startPlaying: ' + words.join(','));
 		var shuffledWords = _.shuffle(words);
@@ -182,16 +156,15 @@ function startPlaying(level, res) {
 		var o = getNextWord(randomWord);
 
 		var wordsList = _.without(shuffledWords, randomWord);		
-		var wordsPlayed = [o];
+		var wordsPlayed = req.session('words');
+		wordsPlayed.unshift(o);
 		// console.log('Random Word: ' + randomWord + '/' + wordsList.length);
 		res.session('words_list', wordsList);
 		res.session('words', wordsPlayed);
 		// console.log(o);
 		var speechOutput = announceWord(o.shuffled, _.template(Sentences.PRE_LETTER_ANNOUNCE)({ 
-			'count': 'first',
-			'letter_count': level 
+			'count': 'first'
 		}));
-		res.say(_.template(Sentences.DIFFICULTY_LEVEL)({ 'level': level }));
 		res.say(speechOutput).shouldEndSession(false);
 		res.send();
 	}).catch(function(error) {
@@ -210,13 +183,34 @@ function askNextWord(req, res) {
 	// console.log('askNextWord:: ' + randomWord + ' - ' + wordsList.length + '/' + wordsPlayed.length);
 	// console.log(o);
 	var speechOutput = announceWord(o.shuffled, _.template(Sentences.PRE_LETTER_ANNOUNCE)({ 
-		'count': 'next',
-		'letter_count': req.session('level') 
+		'count': 'next'
 	}));
 	res.say(speechOutput).shouldEndSession(false, Sentences.SKIP_TO_NEXT);
 	res.session('words_list', wordsList);
 	res.session('words', wordsPlayed);
 	res.send();
+}
+
+function getWordSizeByLevel(levelType) {
+	console.log('getWordSizeByLevel: ' + levelType);
+	var level = { min: 0, max: 0 };
+	switch(levelType.toUpperCase()) {
+		case levelDifficulty.EASY:
+			level.min = 3;
+			level.max = 6;
+			break;
+
+		case levelDifficulty.MEDIUM:
+			level.min = 7;
+			level.max = 9;
+			break;
+
+		case levelDifficulty.HARD:
+			level.min = 10;
+			level.max = Number.POSITIVE_INFINITY;
+			break;
+	}
+	return level;
 }
 
 app.intent(INTENT_SCORE,{
@@ -235,73 +229,37 @@ app.intent(INTENT_SCORE,{
 );
 
 app.intent(INTENT_GUESS,{
-		'slots':{'GuessedWord':'AMAZON.LITERAL'},
-		'utterances':['{|the} {word|answer} is {-|GuessedWord}']
+		'slots':{
+			'CountryName':'AMAZON.Country'
+		},
+		'utterances':[
+			'the country is {CountryName}'
+		]
 	},
 	function(req, res) {
 		var lettersMatch = true;
-		var guess = _.toLower(req.slot('GuessedWord'));
+		var guess = _.toLower(req.slot('CountryName'));
 		var wordsAttempted = req.session('words');
 		wordsAttempted[0].guessTimestamp = Date.now();
 		wordsAttempted[0].guesses.push(guess);
 		var o = _.first(wordsAttempted);
 		var word = _.toLower(o.word);
-		var isAlternativeWord = false;
-		console.log('Guess/Word: ' + guess + ' / ' + word);
-
-		// _.forEach(guesses, function(guess) {
-			if(guess !== word) {
-				
-				if(guess.length === word.length) {
-					for (var i = guess.length - 1; i >= 0; i--) {
-						// console.log('Char @ ' + i + ' ' + guess.charAt(i));
-						var index = word.indexOf(guess.charAt(i));
-						// console.log(index + ' / ' + word);
-						if(index === -1) {
-							lettersMatch = false;
-							break;
-						} else {
-							word = word.substr(0, index) + word.substr(index+1);
-						}
-					}
-					isAlternativeWord = lettersMatch;
-				} else {
-					lettersMatch = false;
-				}
-			}
-		// });
-		// console.log('Answer: ' + guess + ' : ' + lettersMatch + ' / ' + isAlternativeWord);
 
 		var speech = new Speech();
 		var speechOutput;
-		if(lettersMatch) {
+		if(guess === word) {
 			getWordDefinition(guess).then(function(data) {
-				// console.log('getWordDefinitions: ');
-				// console.log(data);
-				//If no word definitions are found, its an invalid guess
-				var definition;
-				if(data.obj.length > 0) {
-					definition = _.first(data.obj).text;
-
-					res.card({
-					  type: 'Standard',
-					  title: guess,
-					  text: definition
-					});
-				} else if(isAlternativeWord) {
-					res.say(_.template(Sentences.NOT_A_WORD)({ 'word': o.word }));
-					res.send();
-					return;
-				}
+				console.log('getWordDefinitions: ');
+				console.log(data);
 
 				var score = guess.length * 10;
 				speech.say(_.template(Sentences.SUCCESS_MESSAGE)({ 
 					'score': score,
 					'exclaim': _.first(_.shuffle(['Well done!', 'Nice!', 'That\'s right!', 'Spot on!', 'Correct answer!', 'Excellent!']))
 				}));
-				speech.say(_.template(Sentences.WORD_DEFINITION)({ 
-					'word': guess,
-					'definition': definition
+				speech.say(_.template(Sentences.WIKI_FACT)({
+					'word': word,
+					'fact': data
 				}));
 				speechOutput = speech.ssml(true);
 
@@ -313,13 +271,19 @@ app.intent(INTENT_GUESS,{
 				res.send();
 		    }).catch(function(error) {
 		    	console.log(error);
-		    	res.say(_.template(Sentences.NOT_A_WORD)({ 'word': o.word }));
+		    	res.say(_.template(Sentences.NOT_A_WORD)({ 
+		    		'guess': guess,
+		    		'word': o.word 
+		    	}));
 		    	res.send();
 		    });
 
 		    return false;
 		} else {
-			speech.say(_.template(Sentences.FAILURE_MESSAGE)({ 'word': o.word }));
+			speech.say(_.template(Sentences.NOT_A_WORD)({
+				'guess': guess,
+				'word': o.word
+			}));
 			speechOutput = speech.ssml(true);
 			res.say(speechOutput).shouldEndSession(false, Sentences.TRY_NEW);
 			res.send();
@@ -335,8 +299,7 @@ app.intent('AMAZON.RepeatIntent',{
 		var o = _.first(wordsPlayed);
 
 		var speechOutput = announceWord(o.shuffled, _.template(Sentences.PRE_LETTER_ANNOUNCE)({ 
-			'count': 'the last',
-			'letter_count': req.session('level') 
+			'count': 'the last'
 		}));
 		res.say(speechOutput).shouldEndSession(false);
 		res.send();
@@ -346,7 +309,7 @@ app.intent('AMAZON.RepeatIntent',{
 app.intent('AMAZON.YesIntent',{
 	}, function(req, res) {
 		if(!req.session('game_started')) {
-			setLevel(DEFAULT_LEVEL, res);
+			setLevel(getWordSizeByLevel(DEFAULT_LEVEL), req, res);
 			return false;
 		} else {
 			askNextWord(req, res);
@@ -366,12 +329,6 @@ app.intent('AMAZON.HelpIntent',{
 	function(req,res) {
 		var speech = new Speech();
 		speech.say(Sentences.GAME_OBJECTIVE);
-		speech.say('Length of words can be controlled, say ');
-		speech.pause('1s');
-		speech.say('set level followed by a number between 3 and 10');
-		speech.say('To answer, say ');
-		speech.pause('1s');
-		speech.say('the word is followed by your guess');
 		var speechOutput = speech.ssml(true);
 		res.shouldEndSession(false, speechOutput);
 		res.send();
@@ -379,14 +336,14 @@ app.intent('AMAZON.HelpIntent',{
 );
 
 app.intent(INTENT_LEVEL,{
-		'slots': {'LevelNumber':'AMAZON.NUMBER'},
+		'slots': {'LevelType':'DIFFICULTY_LEVEL'},
 		'utterances': [
-			'set {the |}level {|at |to }{LevelNumber}'
+			'set {the |}level {|to }{|LevelType}'
 		]
 	},
 	function(req, res) {
-		var level = req.slot('LevelNumber');
-		setLevel(level, res);
+		var level = req.slot('LevelType');
+		setLevel(getWordSizeByLevel(level), req, res);
 		return false;
 	}
 );
@@ -409,7 +366,7 @@ app.intent('AMAZON.StartOverIntent',{
 	},
 	function(req, res) {
 		res.clearSession();
-		startGame(res);
+		startGame(req, res);
 	}
 )
 
@@ -418,7 +375,7 @@ app.error = function(exception, req, res) {
 	speech.say(Sentences.ERROR);
 	speech.pause('500ms');
     res.say(speech.ssml(true));
-    startGame(res);
+    startGame(req, res);
     res.send();
 };
 
@@ -430,7 +387,8 @@ app.sessionEnded(function(request,response) {
 
 app.launch(function(req,res) {
 	console.log('launched!');
-	startGame(res);
+	res.session('words', []);
+	startGame(req, res);
 });
 
 exports.handler = app.lambda();
