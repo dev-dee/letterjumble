@@ -4,6 +4,7 @@ var _ = require('lodash');
 var Alexa = require('alexa-app');
 var Speech = require('ssml-builder');
 var request = require('request-json');
+var md5 = require("nodejs-md5");
 
 module.change_code = 1;
 _.templateSettings.interpolate = /{{([\s\S]+?)}}/g;
@@ -15,9 +16,10 @@ var INTENT_SCORE = 'LetterJumbleScore';
 var isLocal = true;
 var levelDifficulty = { EASY:'EASY', MEDIUM: 'MEDIUM', HARD: 'HARD' };
 var DEFAULT_LEVEL = levelDifficulty.EASY;
-
+var SUCCESS_EXCLAIM = ['Well done!', 'Nice!', 'That\'s right!', 'Spot on!', 'Correct answer!', 'Excellent!'];
 var COUNTRIES_URL = 'https://restcountries.eu/rest/v1/all';
 var WIKI_API_URL = 'https://en.wikipedia.org/w/api.php?format=json&action=query&prop=extracts&exintro=&explaintext=&titles={{keyword}}';
+var WIKI_IMAGES_URL = 'https://en.wikipedia.org/w/api.php?format=json&action=query&prop=extracts&exintro=&explaintext=&titles={{keyword}}&prop=images';
 
 var Sentences = {
 	WIKI_FACT: 'Fact from Wiki about {{word}}: {{fact}}',
@@ -143,7 +145,28 @@ function getWordDefinition(word) {
 			var key = _.first(_.keys(body.query.pages));
 			var extract = body.query.pages[key.toString()]['extract'];
 			var sentences = extract.split('. ');
-			resolve(sentences[_.random(1, sentences.length)]);
+
+			client.get(_.template(WIKI_IMAGES_URL)({
+				'keyword': word
+			}), {}, function(err, res, body) {
+				var images = body.query.pages[key.toString()]['images'];
+				var imageURL = _.replace(_.first(_.shuffle(images)).title.split(':')[1], new RegExp(' ', 'g'), '_');
+				// console.log(imageURL);
+				md5.string.quiet(imageURL, function (err, md5) {
+					if(!err) {
+						// console.log(md5);
+						var directory = md5.charAt(0) + '/' + md5.substr(0, 2) + '/';
+						// console.log(directory);
+						var fullURL = 'https://upload.wikimedia.org/wikipedia/commons/' + directory + imageURL;
+						// console.log(fullURL);
+						resolve({
+							image: fullURL,
+							text: sentences[_.random(1, sentences.length)],
+							fullText: extract
+						});
+					}
+				});
+			});
 		});
 	});
 }
@@ -255,11 +278,11 @@ app.intent(INTENT_GUESS,{
 				var score = guess.length * 10;
 				speech.say(_.template(Sentences.SUCCESS_MESSAGE)({ 
 					'score': score,
-					'exclaim': _.first(_.shuffle(['Well done!', 'Nice!', 'That\'s right!', 'Spot on!', 'Correct answer!', 'Excellent!']))
+					'exclaim': _.first(_.shuffle(SUCCESS_EXCLAIM))
 				}));
 				speech.say(_.template(Sentences.WIKI_FACT)({
 					'word': word,
-					'fact': data
+					'fact': data.text
 				}));
 				speechOutput = speech.ssml(true);
 
@@ -267,6 +290,19 @@ app.intent(INTENT_GUESS,{
 				wordsAttempted[0].bonus = calculateBonus(o);
 				res.session('words', wordsAttempted);
 				res.say(speechOutput).shouldEndSession(false, Sentences.TRY_NEW);
+
+				var cardData = {
+					type: 'Standard',
+					title: _.capitalize(word),
+					text: data.text
+				};
+				if(data.image) {
+					cardData.image = {
+						largeImageUrl: data.image
+					}
+				}
+
+				res.card(cardData);
 				
 				res.send();
 		    }).catch(function(error) {
