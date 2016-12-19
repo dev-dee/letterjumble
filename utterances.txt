@@ -1,19 +1,13 @@
-LetterJumbleGuess	the word is {hello|GuessedWord}
-LetterJumbleGuess	the first word is {echo|GuessedWord}
-LetterJumbleGuess	first word is {voice|GuessedWord}
-LetterJumbleGuess	the second word is {assistant|GuessedWord}
-LetterJumbleGuess	second word is {amaze|GuessedWord}
-LetterJumbleGuess	the third word is {nice|GuessedWord}
-LetterJumbleGuess	third word is {sweet|GuessedWord}
-LetterJumbleLevel	set the difficulty {LevelNumber}
-LetterJumbleLevel	set difficulty {LevelNumber}
-LetterJumbleLevel	set the level {LevelNumber}
-LetterJumbleLevel	set level {LevelNumber}
-LetterJumbleLevel	set the difficulty at {LevelNumber}
-LetterJumbleLevel	set difficulty at {LevelNumber}
-LetterJumbleLevel	set the level at {LevelNumber}
-LetterJumbleLevel	set level at {LevelNumber}
-LetterJumbleLevel	set the difficulty to {LevelNumber}
-LetterJumbleLevel	set difficulty to {LevelNumber}
-LetterJumbleLevel	set the level to {LevelNumber}
-LetterJumbleLevel	set level to {LevelNumber}
+LetterJumbleScore	What is my score
+LetterJumbleScore	Tell me my score
+LetterJumbleScore	What's my score
+LetterJumbleScore	Get my score
+LetterJumbleScore	What is the score
+LetterJumbleScore	Tell me the score
+LetterJumbleScore	What's the score
+LetterJumbleScore	Get the score
+LetterJumbleGuess	the country is {CountryName}
+LetterJumbleLevel	set the level {LevelType}
+LetterJumbleLevel	set level {LevelType}
+LetterJumbleLevel	set the level to {LevelType}
+LetterJumbleLevel	set level to {LevelType}

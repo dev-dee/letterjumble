@@ -22,22 +22,23 @@ var WIKI_API_URL = 'https://en.wikipedia.org/w/api.php?format=json&action=query&
 var WIKI_IMAGES_URL = 'https://en.wikipedia.org/w/api.php?format=json&action=query&prop=extracts&exintro=&explaintext=&titles={{keyword}}&prop=images';
 
 var Sentences = {
-	WIKI_FACT: 'Fact from Wiki about {{word}}: {{fact}}',
+	NO_MORE_WORDS: 'Sorry, no more words left. You may try a different level to continue playing ...',
+	WIKI_FACT: 'Fact about {{word}}: {{fact}}',
 	HEARD_YOU_SAY: 'You said {{word}}',
 	PRE_LETTER_ANNOUNCE_REPEAT: 'The letters are',
-	PRE_LETTER_ANNOUNCE: 'The letters of the {{count}} word are',
+	PRE_LETTER_ANNOUNCE: 'The letters of the {{count}} country are',
 	TRY_NEW: 'Do you want to try a new word?',
 	WELCOME: 'Welcome to the Letter Jumble game!',
-	GAME_OBJECTIVE: 'Rearrange the letters to find the hidden word.',
+	GAME_OBJECTIVE: 'Rearrange the letters to find the hidden country.',
 	ERROR: 'Sorry, something went wrong! Restarting ...',
 	SUCCESS_MESSAGE: '{{exclaim}} You scored {{score}} points.',
-	DIFFICULTY_LEVEL: 'Nice, you will be presented {{count}} letter words.',
+	DIFFICULTY_LEVEL: 'Nice, you will be presented {{count}} letter country names.',
 	SETTIING_GAME_LEVEL: 'Start by setting the level to ' + levelDifficulty.EASY + ', ' + levelDifficulty.MEDIUM + ' or ' + levelDifficulty.HARD + '.',
 	PLAY_DEFAULT_LEVEL: 'Do you want to start playing, level ' + DEFAULT_LEVEL + '?',
 	NO_INTENT_FOUND: 'Sorry, I didn\'t understand that.',
 	SKIP_TO_NEXT: 'Do you want to skip to the next word?',
 	CONTINUE: 'Do you want to continue playing?',
-	NOT_A_WORD: 'Sorry, you said {{guess}}. However, that is incorrect. The word is {{word}}.',
+	NOT_A_WORD: 'I heard you say {{guess}}. However, that is incorrect. The country is {{word}}.',
 	TOTAL_SCORE: 'Your score is {{score}}.'
 };
 
@@ -150,22 +151,32 @@ function getWordDefinition(word) {
 				'keyword': word
 			}), {}, function(err, res, body) {
 				var images = body.query.pages[key.toString()]['images'];
-				var imageURL = _.replace(_.first(_.shuffle(images)).title.split(':')[1], new RegExp(' ', 'g'), '_');
-				// console.log(imageURL);
-				md5.string.quiet(imageURL, function (err, md5) {
-					if(!err) {
-						// console.log(md5);
-						var directory = md5.charAt(0) + '/' + md5.substr(0, 2) + '/';
-						// console.log(directory);
-						var fullURL = 'https://upload.wikimedia.org/wikipedia/commons/' + directory + imageURL;
-						// console.log(fullURL);
-						resolve({
-							image: fullURL,
-							text: sentences[_.random(1, sentences.length)],
-							fullText: extract
-						});
-					}
+				var allowedImages = images.filter(function(img) {
+					return (img.title.indexOf('.jpg') > -1 || img.title.indexOf('.jpeg') > -1 || img.title.indexOf('.png') > -1)
 				});
+				if(allowedImages.length > 0) {
+					var imageURL = _.replace(_.first(_.shuffle(allowedImages)).title.split(':')[1], new RegExp(' ', 'g'), '_');
+					// console.log(imageURL);
+					md5.string.quiet(imageURL, function (err, md5) {
+						if(!err) {
+							// console.log(md5);
+							var directory = md5.charAt(0) + '/' + md5.substr(0, 2) + '/';
+							// console.log(directory);
+							var fullURL = 'https://upload.wikimedia.org/wikipedia/commons/' + directory + imageURL;
+							// console.log(fullURL);
+							resolve({
+								image: fullURL,
+								text: sentences[_.random(1, sentences.length)],
+								fullText: extract
+							});
+						}
+					});
+				} else {
+					resolve({
+						text: sentences[_.random(1, sentences.length)],
+						fullText: extract
+					});
+				}
 			});
 		});
 	});
@@ -197,21 +208,25 @@ function startPlaying(level, req, res) {
 
 function askNextWord(req, res) {
 	var shuffledWords = req.session('words_list');
-	var randomWord = _.first(shuffledWords);
-	var o = getNextWord(randomWord);
+	if(shuffledWords.length > 0) {
+		var randomWord = _.first(shuffledWords);
+		var o = getNextWord(randomWord);
 
-	var wordsList = _.without(shuffledWords, randomWord);
-	var wordsPlayed = req.session('words');
-	wordsPlayed.unshift(o);
-	// console.log('askNextWord:: ' + randomWord + ' - ' + wordsList.length + '/' + wordsPlayed.length);
-	// console.log(o);
-	var speechOutput = announceWord(o.shuffled, _.template(Sentences.PRE_LETTER_ANNOUNCE)({ 
-		'count': 'next'
-	}));
-	res.say(speechOutput).shouldEndSession(false, Sentences.SKIP_TO_NEXT);
-	res.session('words_list', wordsList);
-	res.session('words', wordsPlayed);
-	res.send();
+		var wordsList = _.without(shuffledWords, randomWord);
+		var wordsPlayed = req.session('words');
+		wordsPlayed.unshift(o);
+		// console.log('askNextWord:: ' + randomWord + ' - ' + wordsList.length + '/' + wordsPlayed.length);
+		// console.log(o);
+		var speechOutput = announceWord(o.shuffled, _.template(Sentences.PRE_LETTER_ANNOUNCE)({ 
+			'count': 'next'
+		}));
+		res.say(speechOutput).shouldEndSession(false, Sentences.SKIP_TO_NEXT);
+		res.session('words_list', wordsList);
+		res.session('words', wordsPlayed);
+		res.send();
+	} else {
+		res.say(Sentences.NO_MORE_WORDS).shouldEndSession(false, Sentences.NO_MORE_WORDS);
+	}
 }
 
 function getWordSizeByLevel(levelType) {
@@ -294,7 +309,7 @@ app.intent(INTENT_GUESS,{
 				var cardData = {
 					type: 'Standard',
 					title: _.capitalize(word),
-					text: data.text
+					text: data.text + ' - Wikipedia'
 				};
 				if(data.image) {
 					cardData.image = {
